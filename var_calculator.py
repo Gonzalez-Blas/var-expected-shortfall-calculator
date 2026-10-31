@@ -6,7 +6,17 @@ import seaborn as sns
 
 # 1. Fetch Historical Data
 ticker = "AAPL"
-data = yf.download(ticker, start="2020-01-01", end="2024-01-01")["Adj Close"]
+df = yf.download(ticker, start="2020-01-01", end="2026-10-30", progress=False)
+
+# Extract Close/Adj Close safely across yfinance versions
+if "Adj Close" in df.columns:
+    data = df["Adj Close"]
+else:
+    data = df["Close"]
+
+# If yfinance returns a DataFrame due to MultiIndex columns, squeeze to Series
+if isinstance(data, pd.DataFrame):
+    data = data.squeeze()
 
 # 2. Calculate Daily Returns
 returns = data.pct_change().dropna()
@@ -32,3 +42,4 @@ plt.ylabel("Frequency")
 plt.legend()
 plt.tight_layout()
 plt.savefig("distribution_plot.png")
+plt.show()
