@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 # 1. Fetch Historical Data
-ticker = "LSEG"
+ticker = "AAPL"
 data = yf.download(ticker, start="2020-01-01", end="2024-01-01")["Adj Close"]
 
 # 2. Calculate Daily Returns
