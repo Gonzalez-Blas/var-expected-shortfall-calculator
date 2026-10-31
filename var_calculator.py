@@ -1,45 +1,87 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import scipy.stats as stats
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# 1. Fetch Historical Data
-ticker = "AAPL"
-df = yf.download(ticker, start="2020-01-01", end="2026-10-30", progress=False)
+# ==========================================
+# 1. Multi-Asset Portfolio Setup
+# ==========================================
+tickers = ["AAPL", "MSFT", "GOOGL", "SPY"]
+weights = np.array([0.3, 0.3, 0.2, 0.2])  # Must sum to 1.0
 
-# Extract Close/Adj Close safely across yfinance versions
-if "Adj Close" in df.columns:
-    data = df["Adj Close"]
-else:
-    data = df["Close"]
+# Fetch historical data
+df = yf.download(tickers, start="2020-01-01", end="2026-10-30", progress=False)
 
-# If yfinance returns a DataFrame due to MultiIndex columns, squeeze to Series
-if isinstance(data, pd.DataFrame):
-    data = data.squeeze()
+# Extract prices safely
+data = df["Adj Close"] if "Adj Close" in df.columns else df["Close"]
 
-# 2. Calculate Daily Returns
+# Calculate individual daily returns & weighted portfolio returns
 returns = data.pct_change().dropna()
+portfolio_returns = (returns * weights).sum(axis=1)
 
-# 3. Compute Value at Risk (VaR)
-confidence_level = 0.95
-var_95 = np.percentile(returns, (1 - confidence_level) * 100)
+# ==========================================
+# 2. Historical vs. Parametric VaR & ES
+# ==========================================
+confidence = 0.95
 
-# 4. Compute Expected Shortfall (ES)
-es_95 = returns[returns <= var_95].mean()
+# Historical Simulation Method
+var_hist = np.percentile(portfolio_returns, (1 - confidence) * 100)
+es_hist = portfolio_returns[portfolio_returns <= var_hist].mean()
 
-print(f"Daily VaR (95%): {var_95:.4%}")
-print(f"Daily Expected Shortfall (95%): {es_95:.4%}")
+# Parametric (Variance-Covariance) Method
+mean = np.mean(portfolio_returns)
+std_dev = np.std(portfolio_returns)
+var_param = stats.norm.ppf(1 - confidence, mean, std_dev)
 
-# 5. Plot Loss Distribution
-plt.figure(figsize=(10, 6))
-sns.histplot(returns, bins=50, kde=True, color="skyblue")
-plt.axvline(var_95, color="red", linestyle="--", label=f"VaR 95% ({var_95:.2%})")
-plt.axvline(es_95, color="darkred", linestyle=":", label=f"ES 95% ({es_95:.2%})")
-plt.title(f"Portfolio Loss Distribution & Risk Metrics ({ticker})")
-plt.xlabel("Daily Returns")
-plt.ylabel("Frequency")
-plt.legend()
+# Parametric ES calculation
+z_score = stats.norm.ppf(1 - confidence)
+es_param = mean - (std_dev * stats.norm.pdf(z_score) / (1 - confidence))
+
+print("=== RISK METRICS (95% Confidence) ===")
+print(f"Historical VaR: {var_hist:.4%} | Historical ES: {es_hist:.4%}")
+print(f"Parametric VaR: {var_param:.4%} | Parametric ES: {es_param:.4%}\n")
+
+# ==========================================
+# 3. VaR Backtesting Engine
+# ==========================================
+# Count days where actual portfolio loss exceeded predicted VaR threshold
+exceptions = portfolio_returns[portfolio_returns < var_hist]
+num_exceptions = len(exceptions)
+total_days = len(portfolio_returns)
+exception_rate = num_exceptions / total_days
+expected_rate = 1 - confidence
+
+print("=== BACKTEST RESULTS ===")
+print(f"Total Trading Days Analyzed: {total_days}")
+print(f"VaR Violations (Actual Loss > VaR): {num_exceptions} days")
+print(f"Observed Violation Rate: {exception_rate:.2%} (Expected: {expected_rate:.2%})")
+
+# ==========================================
+# 4. Visualization & Reporting
+# ==========================================
+fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+
+# Plot 1: Portfolio Loss Distribution
+sns.histplot(portfolio_returns, bins=60, kde=True, color="skyblue", ax=axes[0])
+axes[0].axvline(var_hist, color="red", linestyle="--", label=f"Hist VaR ({var_hist:.2%})")
+axes[0].axvline(es_hist, color="darkred", linestyle=":", label=f"Hist ES ({es_hist:.2%})")
+axes[0].axvline(var_param, color="orange", linestyle="--", label=f"Param VaR ({var_param:.2%})")
+axes[0].set_title("Portfolio Return Distribution & Tail Risk Thresholds")
+axes[0].set_xlabel("Daily Returns")
+axes[0].set_ylabel("Frequency")
+axes[0].legend()
+
+# Plot 2: Time-Series Backtesting (Returns vs. VaR Cutoff)
+axes[1].plot(portfolio_returns.index, portfolio_returns, label="Daily Portfolio Return", alpha=0.6, color="navy")
+axes[1].axhline(var_hist, color="red", linestyle="--", label=f"95% VaR Threshold ({var_hist:.2%})")
+axes[1].scatter(exceptions.index, exceptions, color="crimson", zorder=5, label="VaR Violations")
+axes[1].set_title("VaR Backtest: Daily Returns vs. Risk Limit Over Time")
+axes[1].set_xlabel("Date")
+axes[1].set_ylabel("Daily Return")
+axes[1].legend()
+
 plt.tight_layout()
-plt.savefig("distribution_plot.png")
+plt.savefig("portfolio_risk_report.png")
 plt.show()
